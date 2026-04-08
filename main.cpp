@@ -1,50 +1,29 @@
-// header files
-#include <Arduino.h>
+// standard headers
 #include <FEHIO.h>
+#include <FEHSD.h>
 #include <FEHLCD.h>
 #include <FEHMotor.h>
 #include <FEHServo.h>
 #include <FEHUtility.h>
 #include <FEHRCS.h>
+#include <FEHBuzzer.h>
+#include <math.h>
 
-using namespace std;
-
-// light color values
-enum Color {
-    LRED,
-    LBLUE,
-    EMPTY
-};
-
-// constants
-constexpr double IGWAN_MAX_VOLTAGE = 9; // V
-constexpr double FITEC_MAX_VOLTAGE = 6; // V
-constexpr double WHEEL_DIAMETER = 3; // inches
-constexpr double BETWEEN_WHEELS = 8.4; // inches
-constexpr double TIME_PER_CORR = .2; // seconds
-constexpr int COUNTS_PER_REV = 318;
-constexpr int LEFT_MOTOR_FORWARD = -1;
-constexpr int RIGHT_MOTOR_FORWARD = 1;
-constexpr int SWITCH_ACTIVE = 0;
-constexpr int SWITCH_INACTIVE = 1;
-constexpr int MAX_DIFF = 4;
-constexpr int LEFT_RIGHT_DIFF = (MAX_DIFF/2) * LEFT_MOTOR_FORWARD;
-
-constexpr int X_MAX = 319;
-constexpr int Y_MAX = 239;
+// custom written headers
+#include <Music.h>
+#include "main.h"
 
 // define motor and io pins
-FEHMotor leftMotor(FEHMotor::Motor2, IGWAN_MAX_VOLTAGE);
+FEHMotor leftMotor(FEHMotor::Motor1, IGWAN_MAX_VOLTAGE);
 FEHMotor rightMotor(FEHMotor::Motor0, IGWAN_MAX_VOLTAGE);
-FEHServo horizontalServo(FEHServo::Servo0);
-FEHServo verticalServo(FEHServo::Servo1);
 DigitalEncoder leftEncoder(FEHIO::Pin10);
 DigitalEncoder rightEncoder(FEHIO::Pin8);
-DigitalInputPin frontLeftSwitch(FEHIO::Pin0);
-DigitalInputPin frontRightSwitch(FEHIO::Pin1);
 DigitalInputPin backLeftSwitch(FEHIO::Pin2);
 DigitalInputPin backRightSwitch(FEHIO::Pin3);
 AnalogInputPin cdsCell(FEHIO::Pin0);
+
+FEHServo::FEHServoPort horzontalServoPort = FEHServo::Servo0; 
+FEHServo::FEHServoPort verticalServoPort = FEHServo::Servo1;
 
 // classes for organization
 
@@ -54,11 +33,11 @@ class Drive {
     // declare any important consts below
     static constexpr double rampLength = 12; // inches
     static constexpr float timeBuffer = .2; // s
-    static const int8_t percentBeforeJump = 45;
+    static constexpr int percentBeforeJump = 45;
 
-    public:
+public:
     /** 
-     * Drive forward a specific distance in inches. **DEPRECIATED**
+     * Drive forward a specific distance in inches. NO MOTOR SPEED CORRECTION
      * 
      * @param d
      *      Distance in inches.
@@ -69,7 +48,7 @@ class Drive {
     */
     double static LinearForward(double d, int8_t percent);
     /** 
-     * Drive forward a specific distance in inches. Automatically correct difference in motors.
+     * Drive forward a specific distance in inches. Automatic motor speed correction.
      * 
      * @param d
      *      Distance in inches.
@@ -79,41 +58,19 @@ class Drive {
      * @return Number of counts traveled.
     */
     double static Forward(double d, int8_t percent);
-        /** 
-     * Drive forward a specific amount of time. Automatically correct difference in motors.
+    /** 
+     * Drive forward a specific amount of time. Automatic motor speed correction.
      * 
-     * @param t
+     * @param s
      *      Time in seconds.
      * @param percent
      *      Motor percent.
      * 
      * @return Number of counts traveled.
     */
-    double static TimedForward(double t, int8_t percent);
+    double static TimedForward(double s, int8_t percent);
     /**
-     * Drive forward until switches indicate stop.
-     * 
-     * @param includeBoth
-     *      True if both switches need activated, false otherwise.
-     * @param percent
-     *      Motor percent.
-     */
-    void static ToObj(bool includeBoth, int8_t percent);
-    /**
-     * Drive foward until specific distance reached or switches indicate stop.
-     * 
-     * @param d
-     *      Distance in inches.
-     * @param includeBoth
-     *      True if both switches need activated, false otherwise.
-     * @param percent
-     *      Motor percent.
-     * 
-     * @return Number of counts traveled.
-     */
-    double static ForwardOrToObj(double d, bool includeBoth, int8_t percent);
-    /**
-     * Reverse a specific distance in inches. 
+     * Reverse a specific distance in inches. Automatic motor speed correction.
      * 
      * @param d
      *      Distance to travel in inches.
@@ -121,6 +78,15 @@ class Drive {
      *      Motor percent.
      */
     double static Reverse(double d, int8_t percent);
+    /**
+     * Reverse a specific amount of time. Automatic motor speed correction.
+     * 
+     * @param s
+     *      Time in seconds.
+     * @param percent
+     *      Motor percent.
+     */
+    double static TimedReverse(double s, int8_t percent);
     /**
      * Reverse a specific distance in inches or until switches indicate stop.
      * 
@@ -138,9 +104,9 @@ class Maneuver {
     Maneuver();
     // declare any important consts below
     static constexpr float timeBuffer = .5;
-    static const int8_t defaultPercent = 15;
+    static constexpr int8_t defaultPercent = 15;
 
-    public:
+public:
     /**
      * Turn right or left in place for a specific degree value.
      * 
@@ -184,6 +150,8 @@ class Forklift {
     constexpr static int offDegrees = 88;
     constexpr static int leftDegrees = 83;
     constexpr static int rightDegrees = 94;
+    constexpr static int upDegrees = 72;
+    constexpr static int downDegrees = 93;
 
     constexpr static double dbTime = .25;
 public:
@@ -195,7 +163,16 @@ public:
      * @param s
      *      time in seconds to move
      */
-    static void moveHorizontal(char d, double s);
+    static void MoveHorizontal(char d, double s);
+    /**
+     * Move forklift vertically for a certain amount of seconds.
+     * 
+     * @param d
+     *      direction of movement ('U' or 'D')
+     * @param s
+     *      time in seconds to move
+     */
+    static void MoveVertical(char d, double s);
 };
 class LightInput {
     // static
@@ -223,8 +200,455 @@ public:
 /**
  * Test for color values.
  */
+void colorTest();
+/**
+ * Main function code for milestone one.
+ */
+void milestoneOne();
+/**
+ * Main function for milestone two.
+ */
+void milestoneTwo();
+/**
+ * Main function for milestone three.
+ */
+void milestoneThree();
+/**
+ * Main function for milestone four.
+ */
+void milestoneFour();
+/** 
+ * Main function for milestone five.
+*/
+void milestoneFive();
+
+// main
+void ERCMain() {
+    // battery & forklift correction
+    LCD.WriteLine(BatteryVoltage());
+    Forklift::MoveVertical('u', .22);
+
+    // do stuff
+}
+
+// class function definitions
+
+double Drive::LinearForward(double d, int8_t percent) {
+    // find wanted count value, reset encoders, and drive
+    double wantedCounts = (d / (PI*WHEEL_DIAMETER)) * COUNTS_PER_REV;
+    leftEncoder.ResetCounts();
+    rightEncoder.ResetCounts();
+    leftMotor.SetPercent(LEFT_MOTOR_FORWARD * percent);
+    rightMotor.SetPercent(RIGHT_MOTOR_FORWARD * percent);
+
+    // while avg counts of both encoders less than wanted, wait
+    while (((leftEncoder.Counts() + rightEncoder.Counts()) / 2) < wantedCounts) {}
+
+    // stop motors
+    leftMotor.Stop();
+    rightMotor.Stop();
+    LCD.WriteLine(leftEncoder.Counts());
+    LCD.WriteLine(rightEncoder.Counts());
+    Sleep(timeBuffer);
+
+    // return traveled counts
+    return ((leftEncoder.Counts() + rightEncoder.Counts()) / 2);
+} 
+double Drive::Forward(double d, int8_t percent) {
+    // find wanted count value, reset encoders, and drive
+    double wantedCounts = (d / (PI*WHEEL_DIAMETER)) * COUNTS_PER_REV;
+    leftEncoder.ResetCounts();
+    rightEncoder.ResetCounts();
+    int leftPercent = LEFT_MOTOR_FORWARD * percent;
+    int rightPercent = RIGHT_MOTOR_FORWARD * percent;
+    leftMotor.SetPercent(leftPercent);
+    rightMotor.SetPercent(rightPercent);
+
+    float timeSinceCorrection = TimeNow();
+
+    // while avg counts of both encoders less than wanted, wait
+    while (((leftEncoder.Counts() + rightEncoder.Counts()) / 2) < wantedCounts) {
+        // if time per correction has passed, adjust percentages
+        if (TimeNow() - timeSinceCorrection > TIME_PER_CORR) {
+            int diff = abs(leftPercent)-abs(rightPercent);
+            if (leftEncoder.Counts() > rightEncoder.Counts() && diff > -MAX_DIFF) {
+                leftPercent = leftPercent - (1 * LEFT_MOTOR_FORWARD);
+                leftMotor.SetPercent(leftPercent);
+                timeSinceCorrection = TimeNow();
+            } else if (leftEncoder.Counts() < rightEncoder.Counts() && diff < MAX_DIFF) {
+                leftPercent = leftPercent + (1 * LEFT_MOTOR_FORWARD);
+                leftMotor.SetPercent(leftPercent);
+                timeSinceCorrection = TimeNow();
+            }
+        }
+    }
+
+    // stop motors
+    //LCD.WriteLine(leftEncoder.Counts());
+    //LCD.WriteLine(rightEncoder.Counts());
+    leftMotor.Stop();
+    rightMotor.Stop();
+    Sleep(timeBuffer);
+
+    // return traveled counts
+    return ((leftEncoder.Counts() + rightEncoder.Counts()) / 2);
+}
+double Drive::TimedForward(double s, int8_t percent) {
+    // drive
+    int leftPercent = LEFT_MOTOR_FORWARD * percent;
+    int rightPercent = RIGHT_MOTOR_FORWARD * percent;
+    leftMotor.SetPercent(leftPercent);
+    rightMotor.SetPercent(rightPercent);
+
+    float timeSinceCorrection = TimeNow();
+    float timeStart = TimeNow();
+
+    // while avg counts of both encoders less than wanted, wait
+    while (TimeNow() - timeStart < s) {
+        // if time per correction has passed, adjust percentages
+        if (TimeNow() - timeSinceCorrection > TIME_PER_CORR) {
+            int diff = abs(leftPercent)-abs(rightPercent);
+            if (leftEncoder.Counts() > rightEncoder.Counts() && diff > -MAX_DIFF) {
+                leftPercent = leftPercent - (1 * LEFT_MOTOR_FORWARD);
+                leftMotor.SetPercent(leftPercent);
+                timeSinceCorrection = TimeNow();
+            } else if (leftEncoder.Counts() < rightEncoder.Counts() && diff < MAX_DIFF) {
+                leftPercent = leftPercent + (1 * LEFT_MOTOR_FORWARD);
+                leftMotor.SetPercent(leftPercent);
+                timeSinceCorrection = TimeNow();
+            }
+        }
+    }
+
+    // stop motors
+    //LCD.WriteLine(leftEncoder.Counts());
+    //LCD.WriteLine(rightEncoder.Counts());
+    leftMotor.Stop();
+    rightMotor.Stop();
+    Sleep(timeBuffer);
+
+    // return traveled counts
+    return ((leftEncoder.Counts() + rightEncoder.Counts()) / 2);
+}
+double Drive::Reverse(double d, int8_t percent) {
+    // find wanted count value, reset encoders, and drive
+    double wantedCounts = (d / (PI*WHEEL_DIAMETER)) * COUNTS_PER_REV;
+    leftEncoder.ResetCounts();
+    rightEncoder.ResetCounts();
+    int leftPercent = -1 * LEFT_MOTOR_FORWARD * percent;
+    int rightPercent = -1 * RIGHT_MOTOR_FORWARD * percent;
+    leftMotor.SetPercent(leftPercent);
+    rightMotor.SetPercent(rightPercent);
+
+    float timeSinceCorrection = TimeNow();
+
+    // while avg counts of both encoders less than wanted, wait
+    while (((leftEncoder.Counts() + rightEncoder.Counts()) / 2) < wantedCounts) {
+        // if time per correction has passed, adjust percentages
+        if (TimeNow() - timeSinceCorrection > TIME_PER_CORR) {
+            int diff = abs(leftPercent)-abs(rightPercent);
+            if (leftEncoder.Counts() > rightEncoder.Counts() && diff > -MAX_DIFF) {
+                leftPercent += LEFT_MOTOR_FORWARD;
+                leftMotor.SetPercent(leftPercent);
+                timeSinceCorrection = TimeNow();
+            } else if (leftEncoder.Counts() < rightEncoder.Counts() && diff < MAX_DIFF) {
+                leftPercent += (-1 * LEFT_MOTOR_FORWARD);
+                leftMotor.SetPercent(leftPercent);
+                timeSinceCorrection = TimeNow();
+            }
+        }
+    }
+
+    // stop motors
+    //LCD.WriteLine(leftEncoder.Counts());
+    //LCD.WriteLine(rightEncoder.Counts());
+    leftMotor.Stop();
+    rightMotor.Stop();
+    Sleep(timeBuffer);
+
+    // return traveled counts
+    return ((leftEncoder.Counts() + rightEncoder.Counts()) / 2);
+}
+double Drive::TimedReverse(double s, int8_t percent) {
+    // drive
+    int leftPercent = -1 * LEFT_MOTOR_FORWARD * percent;
+    int rightPercent = -1 * RIGHT_MOTOR_FORWARD * percent;
+    leftMotor.SetPercent(leftPercent);
+    rightMotor.SetPercent(rightPercent);
+
+    float timeSinceCorrection = TimeNow();
+    float timeStart = TimeNow();
+
+    // while avg counts of both encoders less than wanted, wait
+    while (TimeNow() - timeStart < s) {
+        // if time per correction has passed, adjust percentages
+        if (TimeNow() - timeSinceCorrection > TIME_PER_CORR) {
+            int diff = abs(leftPercent)-abs(rightPercent);
+            if (leftEncoder.Counts() > rightEncoder.Counts() && diff > -MAX_DIFF) {
+                leftPercent += LEFT_MOTOR_FORWARD;
+                leftMotor.SetPercent(leftPercent);
+                timeSinceCorrection = TimeNow();
+            } else if (leftEncoder.Counts() < rightEncoder.Counts() && diff < MAX_DIFF) {
+                leftPercent += (-1 * LEFT_MOTOR_FORWARD);
+                leftMotor.SetPercent(leftPercent);
+                timeSinceCorrection = TimeNow();
+            }
+        }
+    }
+
+    // stop motors
+    //LCD.WriteLine(leftEncoder.Counts());
+    //LCD.WriteLine(rightEncoder.Counts());
+    leftMotor.Stop();
+    rightMotor.Stop();
+    Sleep(timeBuffer);
+
+    // return traveled counts
+    return ((leftEncoder.Counts() + rightEncoder.Counts()) / 2);
+}
+double Drive::ReverseOrToObj(double d, bool includeBoth, int8_t percent) {
+    // find wanted count value, reset encoders, and drive
+    double wantedCounts = (d / (PI*WHEEL_DIAMETER)) * COUNTS_PER_REV;
+    leftEncoder.ResetCounts();
+    rightEncoder.ResetCounts();
+    int leftPercent = -1 * LEFT_MOTOR_FORWARD * percent;
+    int rightPercent = -1 * RIGHT_MOTOR_FORWARD * percent;
+    leftMotor.SetPercent(leftPercent);
+    rightMotor.SetPercent(rightPercent);
+
+    float timeSinceCorrection = TimeNow();
+    bool switchStop = false;
+
+    // while avg counts of both encoders less than wanted, wait
+    while (((leftEncoder.Counts() + rightEncoder.Counts()) / 2) < wantedCounts && !switchStop) {
+        // if time per correction has passed, adjust percentages
+        if (TimeNow() - timeSinceCorrection > TIME_PER_CORR) {
+            int diff = abs(leftPercent)-abs(rightPercent);
+            if (leftEncoder.Counts() > rightEncoder.Counts() && diff > -MAX_DIFF) {
+                leftPercent += LEFT_MOTOR_FORWARD;
+                leftMotor.SetPercent(leftPercent);
+                timeSinceCorrection = TimeNow();
+            } else if (leftEncoder.Counts() < rightEncoder.Counts() && diff < MAX_DIFF) {
+                leftPercent += (-1 * LEFT_MOTOR_FORWARD);
+                leftMotor.SetPercent(leftPercent);
+                timeSinceCorrection = TimeNow();
+            }
+        }
+
+        if (includeBoth) {
+            switchStop = (backLeftSwitch.Value() == SWITCH_ACTIVE 
+                && backRightSwitch.Value() == SWITCH_ACTIVE);
+        } else {
+            switchStop = (backLeftSwitch.Value() == SWITCH_ACTIVE
+                || backRightSwitch.Value() == SWITCH_ACTIVE);
+        }
+    }
+
+    // stop motors
+    leftMotor.Stop();
+    rightMotor.Stop();
+    Sleep(timeBuffer);
+
+    // return traveled counts
+    return ((leftEncoder.Counts() + rightEncoder.Counts()) / 2);
+}
+double Maneuver::Turn(char direction, int degrees, int8_t percent) {
+    /* 
+     * fraction of the circumference to travel 
+     * times the circle made around the wheel axle
+    */
+    double distance = (degrees / 360.) * (PI * BETWEEN_WHEELS);
+    double wantedCounts = (distance / (PI * WHEEL_DIAMETER)) * COUNTS_PER_REV;
+
+    // set percent values
+    int8_t leftPercent = LEFT_MOTOR_FORWARD * percent;
+    int8_t rightPercent = RIGHT_MOTOR_FORWARD * percent;
+    if (direction == 'r' || direction == 'R') {
+        rightPercent *= -1;
+    } else if (direction == 'l' || direction == 'L') {
+        leftPercent *= -1;
+    }
+
+    int leftIncrease;
+    if (leftPercent > 0) leftIncrease = 1;
+    else leftIncrease = -1;
+
+    // reset encoder counts and start motors
+    leftEncoder.ResetCounts();
+    rightEncoder.ResetCounts();
+    leftMotor.SetPercent(leftPercent);
+    rightMotor.SetPercent(rightPercent);
+
+    float timeSinceCorrection = TimeNow();
+
+    // wait until distance traveled
+    while (((leftEncoder.Counts() + rightEncoder.Counts()) / 2) < wantedCounts) {
+        // if time per correction has passed, adjust percentages
+        if (TimeNow() - timeSinceCorrection > TIME_PER_CORR) {
+            int diff = abs(leftPercent)-abs(rightPercent);
+
+            if (leftEncoder.Counts() > rightEncoder.Counts() && diff > 0) {
+                leftPercent -= leftIncrease;
+                leftMotor.SetPercent(leftPercent);
+                timeSinceCorrection = TimeNow();
+            } else if (leftEncoder.Counts() < rightEncoder.Counts() && diff < MAX_DIFF) {
+                leftPercent += leftIncrease;
+                leftMotor.SetPercent(leftPercent);
+                timeSinceCorrection = TimeNow();
+            }
+        }
+    }
+
+    // stop motors & wait
+    leftMotor.Stop();
+    rightMotor.Stop();
+    Sleep(timeBuffer);
+
+    // return traveled counts
+    return ((leftEncoder.Counts() + rightEncoder.Counts()) / 2);
+} 
+int Maneuver::TurnOneWheel(char direction, int degrees, int8_t percent) {
+    /* 
+     * fraction of the circumference to travel 
+     * times the circle made around the wheel axle
+    */
+    double distance = (degrees / 360.) * (PI * 2 * BETWEEN_WHEELS);
+    double wantedCounts = (distance / (PI * WHEEL_DIAMETER)) * COUNTS_PER_REV;
+
+    // reset both counts and start motor
+    leftEncoder.ResetCounts();
+    rightEncoder.ResetCounts();
+    if (direction == 'r' || direction == 'R') {
+        leftMotor.SetPercent(percent*LEFT_MOTOR_FORWARD);
+    } else if (direction == 'l' || direction == 'L') {
+        rightMotor.SetPercent(percent*RIGHT_MOTOR_FORWARD);
+    }
+
+    // while neither has traveled the wanted counts, wait
+    while (leftEncoder.Counts() + rightEncoder.Counts() < wantedCounts) {}
+
+    // stop both & sleep
+    leftMotor.Stop();
+    rightMotor.Stop();
+    Sleep(timeBuffer);
+
+    return (leftEncoder.Counts() + rightEncoder.Counts());
+}
+void Maneuver::FlattenAgainstWall(char direction, int8_t percent) {
+    // set percent values
+    int8_t firstPercent;
+    int8_t secondPercent;
+
+    // set order
+    FEHMotor* first;
+    FEHMotor* second;
+    DigitalInputPin* firstSwitch;
+    DigitalInputPin* secondSwitch;
+    if (direction == 'r' || direction == 'R') {
+        first = &rightMotor;
+        firstPercent = -1 * RIGHT_MOTOR_FORWARD * percent;
+        firstSwitch = &backRightSwitch;
+
+        second = &leftMotor;
+        secondPercent = -1 * LEFT_MOTOR_FORWARD * percent;
+        secondSwitch = &backLeftSwitch;
+    } else if (direction == 'l' || direction == 'L') {
+        first = &leftMotor;
+        firstPercent = -1 * LEFT_MOTOR_FORWARD * percent;
+        firstSwitch = &backLeftSwitch;
+
+        second = &rightMotor;
+        secondPercent = -1 * RIGHT_MOTOR_FORWARD * percent;
+        secondSwitch = &backRightSwitch;
+    }
+
+    // drive
+    (*first).SetPercent(firstPercent);
+    while ((*firstSwitch).Value() == SWITCH_INACTIVE) {}
+    (*first).Stop();
+    Sleep(timeBuffer);
+    (*second).SetPercent(secondPercent);
+    while ((*secondSwitch).Value() == SWITCH_INACTIVE) {}
+    (*second).Stop();
+    Sleep(timeBuffer);
+}
+void Forklift::MoveHorizontal(char d, double s) {
+    {
+    FEHServo horizontalServo(horzontalServoPort);
+    // find direction of movement, none if d input invalid
+    int degrees = offDegrees;
+    if (d == 'l' || d == 'L') {
+        degrees = leftDegrees;
+    } else if (d == 'r' || d == 'R') {
+        degrees = rightDegrees;
+    }
+
+    // set to move and wait
+    horizontalServo.SetDegree(degrees);
+    float startTime = TimeNow();
+    while (TimeNow() - startTime < s) {}
+    // turn off
+    }
+    Sleep(dbTime);
+}
+void Forklift::MoveVertical(char d, double s) {
+    {
+    FEHServo verticalServo(verticalServoPort);
+    // find direction of movement, none if d input invalid
+    int degrees = offDegrees;
+    if (d == 'u' || d == 'U') {
+        degrees = upDegrees;
+    } else if (d == 'd' || d == 'D') {
+        degrees = downDegrees;
+    }
+
+    // set to move and wait
+    verticalServo.SetDegree(degrees);
+    float startTime = TimeNow();
+    while (TimeNow() - startTime < s) {}
+    // turn off
+    }
+    Sleep(dbTime);
+}
+Color LightInput::GetColorReading(bool wait) {
+    float value = cdsCell.Value();
+    LCD.WriteLine(value);
+    Color reading;
+    if (wait) {
+        // wait for value other than empty
+        float startTime = TimeNow(); // seconds
+        while (value > blueMax && value <= emptyMax && (TimeNow() - startTime) < waitTime) {
+            Sleep(readBuffer);
+            value = cdsCell.Value();
+        }
+        if (value > 0 && value <= redMax) {
+            reading = LRED;
+        } else if (value > redMax && value <= blueMax) {
+            reading = LBLUE;
+        } else if ((TimeNow() - startTime) < waitTime) {
+            LCD.WriteLine("Max time exceeded for color reading!");
+        } else {
+            LCD.WriteLine("Unhandled color value exception!");
+        }
+    } else {
+        // return whatever value matches
+        if (value >= .2 && value <= .8) {
+            reading = LRED;
+        } else if (value >= 1.1 && value <= 1.7) {
+            reading = LBLUE;
+        } else {
+            reading = EMPTY;
+        }
+    }
+
+    return reading;
+}
+void LightInput::WaitForStart() {
+    while (GetColorReading(false) != LRED) {}
+}
+
 void colorTest() {
-        while (true) {
+    while (true) {
         String output;
         LCD.Clear();
         Color reading = LightInput::GetColorReading(false);
@@ -246,31 +670,6 @@ void colorTest() {
         Sleep(.25);
     }
 }
-
-void openWindow(double d, int8_t percent) {
-    // find wanted count value, reset encoders, and drive
-    double wantedCounts = (d / (PI*WHEEL_DIAMETER)) * COUNTS_PER_REV;
-    leftEncoder.ResetCounts();
-    rightEncoder.ResetCounts();
-    int leftPercent = LEFT_MOTOR_FORWARD * percent + LEFT_RIGHT_DIFF;
-    int rightPercent = RIGHT_MOTOR_FORWARD * percent;
-    leftMotor.SetPercent(leftPercent + 2);
-    rightMotor.SetPercent(rightPercent);
-
-    // while avg counts of both encoders less than wanted, wait
-    while (leftEncoder.Counts() < wantedCounts) {}
-
-    // stop motors
-    //LCD.WriteLine(leftEncoder.Counts());
-    //LCD.WriteLine(rightEncoder.Counts());
-    leftMotor.Stop();
-    rightMotor.Stop();
-    Sleep(.25);
-}
-
-/**
- * Main function code for milestone one.
- */
 void milestoneOne() {
     // x y vars
     int x, y;
@@ -309,12 +708,8 @@ void milestoneOne() {
     LCD.Clear();
     LCD.WriteLine("Complete!");
 }
-
-/**
- * Main function for milestone two.
- */
 void milestoneTwo() {
-// wait for start light and press button
+    // wait for start light and press button
     LightInput::WaitForStart();
     Drive::Forward(2.4, 25); 
     Drive::Forward(2.4, -25);
@@ -364,10 +759,6 @@ void milestoneTwo() {
     // press button
     Drive::Forward(5, 25);
 }
-
-/**
- * Main function for milestone three.
- */
 void milestoneThree() {
     // start light
     LightInput::WaitForStart();
@@ -399,417 +790,42 @@ void milestoneThree() {
     // close window
     Drive::Reverse(10, 35);
 }
-
-/**
- * Main function for milestone four.
- */
 void milestoneFour() {
+    // start light
+    LightInput::WaitForStart();
+
+    // press button and back up
+    Drive::TimedForward(.25, -20); // kinda cheating forward, should write one for reverse
+    Drive::Forward(21.675, 30);
+    Maneuver::Turn('L', 45, 20);
+
+    // grab bucket
+    Drive::Forward(3.25, 20);
+    Forklift::MoveVertical('u', 1);
+    Sleep(.25);
+    Drive::Reverse(3.25, 20);
     
+    // travel to and up ramp
+    Maneuver::Turn('L', 90, 25);
+    Drive::Forward(6.5, 25);
+    Maneuver::Turn('L', 90, 25);
+    Drive::Forward(11, 25);
+    Maneuver::TurnOneWheel('L', 89, 35);
+    Drive::Forward(25, 36.5);
+    Maneuver::Turn('L', 90, 25);
+    Drive::Forward(4.1, 25);
+    Maneuver::Turn('R', 92, 25);
+    Drive::Forward(15.5, 25);
+    Forklift::MoveVertical('d', .5);
+    Sleep(.25);
+    Drive::Reverse(4, 25);
+    Maneuver::Turn('L', 70, 25);
+    Forklift::MoveVertical('u', 1);
+    Sleep(.25);
+    Drive::Forward(9.6, 25);
+    Maneuver::TurnOneWheel('L', 10, 20);
+    Forklift::MoveVertical('d', 1.5);
 }
-
-// main
-void ERCMain() {
-    // battery
-    LCD.WriteLine(BatteryVoltage());
-
-    // do stuff
-    TestGUI();
-}
-
-// class function definitions
-
-double Drive::LinearForward(double d, int8_t percent) {
-    // find wanted count value, reset encoders, and drive
-    double wantedCounts = (d / (PI*WHEEL_DIAMETER)) * COUNTS_PER_REV;
-    leftEncoder.ResetCounts();
-    rightEncoder.ResetCounts();
-    leftMotor.SetPercent(LEFT_MOTOR_FORWARD * percent);
-    rightMotor.SetPercent(RIGHT_MOTOR_FORWARD * percent);
-
-    // while avg counts of both encoders less than wanted, wait
-    while (((leftEncoder.Counts() + rightEncoder.Counts()) / 2) < wantedCounts) {}
-
-    // stop motors
-    leftMotor.Stop();
-    rightMotor.Stop();
-    LCD.WriteLine(leftEncoder.Counts());
-    LCD.WriteLine(rightEncoder.Counts());
-    Sleep(timeBuffer);
-
-    // return traveled counts
-    return ((leftEncoder.Counts() + rightEncoder.Counts()) / 2);
-} 
-double Drive::Forward(double d, int8_t percent) {
-    // find wanted count value, reset encoders, and drive
-    double wantedCounts = (d / (PI*WHEEL_DIAMETER)) * COUNTS_PER_REV;
-    leftEncoder.ResetCounts();
-    rightEncoder.ResetCounts();
-    int leftPercent = LEFT_MOTOR_FORWARD * percent + LEFT_RIGHT_DIFF;
-    int rightPercent = RIGHT_MOTOR_FORWARD * percent;
-    leftMotor.SetPercent(leftPercent);
-    rightMotor.SetPercent(rightPercent);
-
-    float timeSinceCorrection = TimeNow();
-
-    // while avg counts of both encoders less than wanted, wait
-    while (((leftEncoder.Counts() + rightEncoder.Counts()) / 2) < wantedCounts) {
-        // if time per correction has passed, adjust percentages
-        if (TimeNow() - timeSinceCorrection > TIME_PER_CORR) {
-            int diff = leftPercent*LEFT_MOTOR_FORWARD-rightPercent*RIGHT_MOTOR_FORWARD;
-            if (leftEncoder.Counts() > rightEncoder.Counts() && diff > 0) {
-                leftPercent = leftPercent - (1 * LEFT_MOTOR_FORWARD);
-                leftMotor.SetPercent(leftPercent);
-                timeSinceCorrection = TimeNow();
-            } else if (leftEncoder.Counts() < rightEncoder.Counts() && diff < MAX_DIFF) {
-                leftPercent = leftPercent + (1 * LEFT_MOTOR_FORWARD);
-                leftMotor.SetPercent(leftPercent);
-                timeSinceCorrection = TimeNow();
-            }
-        }
-    }
-
-    // stop motors
-    //LCD.WriteLine(leftEncoder.Counts());
-    //LCD.WriteLine(rightEncoder.Counts());
-    leftMotor.Stop();
-    rightMotor.Stop();
-    Sleep(timeBuffer);
-
-    // return traveled counts
-    return ((leftEncoder.Counts() + rightEncoder.Counts()) / 2);
-}
-double Drive::TimedForward(double t, int8_t percent) {
-    // find wanted count value, reset encoders, and drive
-    int leftPercent = LEFT_MOTOR_FORWARD * percent + LEFT_RIGHT_DIFF;
-    int rightPercent = RIGHT_MOTOR_FORWARD * percent;
-    leftMotor.SetPercent(leftPercent);
-    rightMotor.SetPercent(rightPercent);
-
-    float timeSinceCorrection = TimeNow();
-    float timeStart = TimeNow();
-
-    // while avg counts of both encoders less than wanted, wait
-    while (TimeNow() - timeStart < t) {
-        // if time per correction has passed, adjust percentages
-        if (TimeNow() - timeSinceCorrection > TIME_PER_CORR) {
-            int diff = leftPercent*LEFT_MOTOR_FORWARD-rightPercent*RIGHT_MOTOR_FORWARD;
-            if (leftEncoder.Counts() > rightEncoder.Counts() && diff > 0) {
-                leftPercent = leftPercent - (1 * LEFT_MOTOR_FORWARD);
-                leftMotor.SetPercent(leftPercent);
-                timeSinceCorrection = TimeNow();
-            } else if (leftEncoder.Counts() < rightEncoder.Counts() && diff < MAX_DIFF) {
-                leftPercent = leftPercent + (1 * LEFT_MOTOR_FORWARD);
-                leftMotor.SetPercent(leftPercent);
-                timeSinceCorrection = TimeNow();
-            }
-        }
-    }
-
-    // stop motors
-    //LCD.WriteLine(leftEncoder.Counts());
-    //LCD.WriteLine(rightEncoder.Counts());
-    leftMotor.Stop();
-    rightMotor.Stop();
-    Sleep(timeBuffer);
-
-    // return traveled counts
-    return ((leftEncoder.Counts() + rightEncoder.Counts()) / 2);
-}
-void Drive::ToObj(bool includeBoth, int8_t percent) {
-    // drive
-    leftMotor.SetPercent(LEFT_MOTOR_FORWARD * percent + LEFT_RIGHT_DIFF);
-    rightMotor.SetPercent(RIGHT_MOTOR_FORWARD * percent);
-
-    if (includeBoth) {
-        // wait until both pressed
-        while (!(frontLeftSwitch.Value() || frontRightSwitch.Value())) {}
-    } else {
-        // wait until a single one is pressed
-        while (frontLeftSwitch.Value() && frontRightSwitch.Value()) {}
-    }
-
-    // stop
-    leftMotor.Stop();
-    rightMotor.Stop();
-    Sleep(timeBuffer);
-}
-double Drive::ForwardOrToObj(double d, bool includeBoth, int8_t percent) {
-    // find wanted count value, reset encoders, and drive
-    double wantedCounts = (d / (PI * WHEEL_DIAMETER)) * COUNTS_PER_REV;
-    leftEncoder.ResetCounts();
-    rightEncoder.ResetCounts();
-    leftMotor.SetPercent(LEFT_MOTOR_FORWARD * percent + LEFT_RIGHT_DIFF);
-    rightMotor.SetPercent(RIGHT_MOTOR_FORWARD * percent);
-
-    // wait conditions
-    if (includeBoth) {
-        while (!(frontLeftSwitch.Value() || frontRightSwitch.Value())
-         && (((leftEncoder.Counts() + rightEncoder.Counts()) / 2) < wantedCounts)) {}
-    } else {
-        while ((frontLeftSwitch.Value() && frontRightSwitch.Value())
-         && (((leftEncoder.Counts() + rightEncoder.Counts()) / 2) < wantedCounts)) {}
-    }
-
-    // stop motors & wait
-    leftMotor.Stop();
-    rightMotor.Stop();
-    Sleep(timeBuffer);
-
-    // return traveled counts
-    return ((leftEncoder.Counts() + rightEncoder.Counts()) / 2);
-}
-double Drive::Reverse(double d, int8_t percent) {
-    // find wanted count value, reset encoders, and drive
-    double wantedCounts = (d / (PI*WHEEL_DIAMETER)) * COUNTS_PER_REV;
-    leftEncoder.ResetCounts();
-    rightEncoder.ResetCounts();
-    int leftPercent = -1 * LEFT_MOTOR_FORWARD * percent + -1 * LEFT_RIGHT_DIFF;
-    int rightPercent = -1 * RIGHT_MOTOR_FORWARD * percent;
-    leftMotor.SetPercent(leftPercent);
-    rightMotor.SetPercent(rightPercent);
-
-    float timeSinceCorrection = TimeNow();
-
-    // while avg counts of both encoders less than wanted, wait
-    while (((leftEncoder.Counts() + rightEncoder.Counts()) / 2) < wantedCounts) {
-        // if time per correction has passed, adjust percentages
-        if (TimeNow() - timeSinceCorrection > TIME_PER_CORR) {
-            int diff = leftPercent*LEFT_MOTOR_FORWARD-rightPercent*RIGHT_MOTOR_FORWARD;
-            if (leftEncoder.Counts() > rightEncoder.Counts() && diff > 0) {
-                leftPercent = leftPercent - (-1 * LEFT_MOTOR_FORWARD);
-                leftMotor.SetPercent(leftPercent);
-                timeSinceCorrection = TimeNow();
-            } else if (leftEncoder.Counts() < rightEncoder.Counts() && diff < MAX_DIFF) {
-                leftPercent = leftPercent + (-1 * LEFT_MOTOR_FORWARD);
-                leftMotor.SetPercent(leftPercent);
-                timeSinceCorrection = TimeNow();
-            }
-        }
-    }
-
-    // stop motors
-    //LCD.WriteLine(leftEncoder.Counts());
-    //LCD.WriteLine(rightEncoder.Counts());
-    leftMotor.Stop();
-    rightMotor.Stop();
-    Sleep(timeBuffer);
-
-    // return traveled counts
-    return ((leftEncoder.Counts() + rightEncoder.Counts()) / 2);
-}
-double Drive::ReverseOrToObj(double d, bool includeBoth, int8_t percent) {
-    // find wanted count value, reset encoders, and drive
-    double wantedCounts = (d / (PI*WHEEL_DIAMETER)) * COUNTS_PER_REV;
-    leftEncoder.ResetCounts();
-    rightEncoder.ResetCounts();
-    int leftPercent = -1 * LEFT_MOTOR_FORWARD * percent + -1 * LEFT_RIGHT_DIFF;
-    int rightPercent = -1 * RIGHT_MOTOR_FORWARD * percent;
-    leftMotor.SetPercent(leftPercent);
-    rightMotor.SetPercent(rightPercent);
-
-    float timeSinceCorrection = TimeNow();
-    bool switchStop = false;
-
-    // while avg counts of both encoders less than wanted, wait
-    while (((leftEncoder.Counts() + rightEncoder.Counts()) / 2) < wantedCounts && !switchStop) {
-        // if time per correction has passed, adjust percentages
-        if (TimeNow() - timeSinceCorrection > TIME_PER_CORR) {
-            int diff = leftPercent*LEFT_MOTOR_FORWARD-rightPercent*RIGHT_MOTOR_FORWARD;
-            if (leftEncoder.Counts() > rightEncoder.Counts() && diff > 0) {
-                leftPercent = leftPercent - (-1 * LEFT_MOTOR_FORWARD);
-                leftMotor.SetPercent(leftPercent);
-                timeSinceCorrection = TimeNow();
-            } else if (leftEncoder.Counts() < rightEncoder.Counts() && diff < MAX_DIFF) {
-                leftPercent = leftPercent + (-1 * LEFT_MOTOR_FORWARD);
-                leftMotor.SetPercent(leftPercent);
-                timeSinceCorrection = TimeNow();
-            }
-        }
-
-        if (includeBoth) {
-            switchStop = (backLeftSwitch.Value() == SWITCH_ACTIVE 
-                && backRightSwitch.Value() == SWITCH_ACTIVE);
-        } else {
-            switchStop = (backLeftSwitch.Value() == SWITCH_ACTIVE
-                || backRightSwitch.Value() == SWITCH_ACTIVE);
-        }
-    }
-
-    // stop motors
-    leftMotor.Stop();
-    rightMotor.Stop();
-    Sleep(timeBuffer);
-
-    // return traveled counts
-    return ((leftEncoder.Counts() + rightEncoder.Counts()) / 2);
-}
-double Maneuver::Turn(char direction, int degrees, int8_t percent) {
-    /* 
-     * fraction of the circumference to travel 
-     * times the circle made around the wheel axle
-    */
-    double distance = (degrees / 360.) * (PI * BETWEEN_WHEELS);
-    double wantedCounts = (distance / (PI * WHEEL_DIAMETER)) * COUNTS_PER_REV;
-
-    // set percent values
-    int8_t leftPercent = LEFT_MOTOR_FORWARD * percent + LEFT_RIGHT_DIFF;
-    int8_t rightPercent = RIGHT_MOTOR_FORWARD * percent;
-    if (direction == 'r' || direction == 'R') {
-        rightPercent *= -1;
-    } else if (direction == 'l' || direction == 'L') {
-        leftPercent *= -1;
-    }
-
-    // reset encoder counts and start motors
-    leftEncoder.ResetCounts();
-    rightEncoder.ResetCounts();
-    leftMotor.SetPercent(leftPercent);
-    rightMotor.SetPercent(rightPercent);
-
-    float timeSinceCorrection = TimeNow();
-
-    // wait until distance traveled
-    while (((leftEncoder.Counts() + rightEncoder.Counts()) / 2) < wantedCounts) {
-        // if time per correction has passed, adjust percentages
-        if (TimeNow() - timeSinceCorrection > TIME_PER_CORR) {
-            int diff = leftPercent*LEFT_MOTOR_FORWARD-rightPercent*RIGHT_MOTOR_FORWARD;
-            if (leftEncoder.Counts() > rightEncoder.Counts() && diff > 0) {
-                leftPercent = leftPercent - (1 * LEFT_MOTOR_FORWARD);
-                leftMotor.SetPercent(leftPercent);
-                timeSinceCorrection = TimeNow();
-            } else if (leftEncoder.Counts() < rightEncoder.Counts() && diff < MAX_DIFF) {
-                leftPercent = leftPercent + (1 * LEFT_MOTOR_FORWARD);
-                leftMotor.SetPercent(leftPercent);
-                timeSinceCorrection = TimeNow();
-            }
-        }
-    }
-
-    // stop motors & wait
-    leftMotor.Stop();
-    rightMotor.Stop();
-    Sleep(timeBuffer);
-
-    // return traveled counts
-    return ((leftEncoder.Counts() + rightEncoder.Counts()) / 2);
-} 
-int Maneuver::TurnOneWheel(char direction, int degrees, int8_t percent) {
-    /* 
-     * fraction of the circumference to travel 
-     * times the circle made around the wheel axle
-    */
-    double distance = (degrees / 360.) * (PI * 2 * BETWEEN_WHEELS);
-    double wantedCounts = (distance / (PI * WHEEL_DIAMETER)) * COUNTS_PER_REV;
-
-    // reset both counts and start motor
-    leftEncoder.ResetCounts();
-    rightEncoder.ResetCounts();
-    if (direction == 'r' || direction == 'R') {
-        leftMotor.SetPercent(percent*LEFT_MOTOR_FORWARD + LEFT_RIGHT_DIFF);
-    } else if (direction == 'l' || direction == 'L') {
-        rightMotor.SetPercent(percent*RIGHT_MOTOR_FORWARD);
-    }
-
-    // while neither has traveled the wanted counts, wait
-    while (leftEncoder.Counts() + rightEncoder.Counts() < wantedCounts) {}
-
-    // stop both & sleep
-    leftMotor.Stop();
-    rightMotor.Stop();
-    Sleep(timeBuffer);
-
-    return (leftEncoder.Counts() + rightEncoder.Counts());
-}
-void Maneuver::FlattenAgainstWall(char direction, int8_t percent) {
-    // set percent values
-    int8_t firstPercent;
-    int8_t secondPercent;
-
-    // set order
-    FEHMotor* first;
-    FEHMotor* second;
-    DigitalInputPin* firstSwitch;
-    DigitalInputPin* secondSwitch;
-    if (direction == 'r' || direction == 'R') {
-        first = &rightMotor;
-        firstPercent = -1 * RIGHT_MOTOR_FORWARD * percent;
-        firstSwitch = &backRightSwitch;
-
-        second = &leftMotor;
-        secondPercent = -1 * LEFT_MOTOR_FORWARD * percent + LEFT_RIGHT_DIFF;
-        secondSwitch = &backLeftSwitch;
-    } else if (direction == 'l' || direction == 'L') {
-        first = &leftMotor;
-        firstPercent = -1 * LEFT_MOTOR_FORWARD * percent + LEFT_RIGHT_DIFF;
-        firstSwitch = &backLeftSwitch;
-
-        second = &rightMotor;
-        secondPercent = -1 * RIGHT_MOTOR_FORWARD * percent;
-        secondSwitch = &backRightSwitch;
-    }
-
-    // drive
-    (*first).SetPercent(firstPercent);
-    while ((*firstSwitch).Value() == SWITCH_INACTIVE) {}
-    (*first).Stop();
-    Sleep(timeBuffer);
-    (*second).SetPercent(secondPercent);
-    while ((*secondSwitch).Value() == SWITCH_INACTIVE) {}
-    (*second).Stop();
-    Sleep(timeBuffer);
-}
-void Forklift::moveHorizontal(char d, double s) {
-    // find direction of movement, none if d input invalid
-    int degrees = offDegrees;
-    if (d == 'l' || d == 'L') {
-        degrees = leftDegrees;
-    } else if (d == 'r' || d == 'R') {
-        degrees = rightDegrees;
-    }
-
-    // set to move and wait
-    horizontalServo.SetDegree(degrees);
-    float startTime = TimeNow();
-    while (TimeNow() - startTime < s) {}
-    // turn off
-    horizontalServo.SetDegree(offDegrees);
-
-    // wait db time
-    Sleep(dbTime);
-}
-Color LightInput::GetColorReading(bool wait) {
-    float value = cdsCell.Value();
-    LCD.WriteLine(value);
-    Color reading;
-    if (wait) {
-        // wait for value other than empty
-        float startTime = TimeNow(); // seconds
-        while (value > blueMax && value <= emptyMax && (TimeNow() - startTime) < waitTime) {
-            Sleep(readBuffer);
-            value = cdsCell.Value();
-        }
-        if (value > 0 && value <= redMax) {
-            reading = LRED;
-        } else if (value > redMax && value <= blueMax) {
-            reading = LBLUE;
-        } else if ((TimeNow() - startTime) < waitTime) {
-            LCD.WriteLine("Max time exceeded for color reading!");
-        } else {
-            LCD.WriteLine("Unhandled color value exception!");
-        }
-    } else {
-        // return whatever value matches
-        if (value >= .2 && value <= .8) {
-            reading = LRED;
-        } else if (value >= 1.1 && value <= 1.7) {
-            reading = LBLUE;
-        } else {
-            reading = EMPTY;
-        }
-    }
-
-    return reading;
-}
-void LightInput::WaitForStart() {
-    while (GetColorReading(false) != LRED) {}
+void milestoneFive() {
+    
 }
