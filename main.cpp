@@ -148,8 +148,8 @@ class Forklift {
     Forklift();
 
     constexpr static int offDegrees = 88;
-    constexpr static int leftDegrees = 83;
-    constexpr static int rightDegrees = 94;
+    constexpr static int leftDegrees = 180;
+    constexpr static int rightDegrees = 0;
     constexpr static int upDegrees = 72;
     constexpr static int downDegrees = 93;
 
@@ -204,23 +204,6 @@ void colorTest();
 /**
  * Main function code for milestone one.
  */
-void milestoneOne();
-/**
- * Main function for milestone two.
- */
-void milestoneTwo();
-/**
- * Main function for milestone three.
- */
-void milestoneThree();
-/**
- * Main function for milestone four.
- */
-void milestoneFour();
-/** 
- * Main function for milestone five.
-*/
-void milestoneFive();
 
 // main
 void ERCMain() {
@@ -229,6 +212,7 @@ void ERCMain() {
     Forklift::MoveVertical('u', .22);
 
     // do stuff
+    FinalRun();
 }
 
 // class function definitions
@@ -256,6 +240,7 @@ double Drive::LinearForward(double d, int8_t percent) {
 } 
 double Drive::Forward(double d, int8_t percent) {
     // find wanted count value, reset encoders, and drive
+    const int TIMEOUT = 12; // s
     double wantedCounts = (d / (PI*WHEEL_DIAMETER)) * COUNTS_PER_REV;
     leftEncoder.ResetCounts();
     rightEncoder.ResetCounts();
@@ -264,10 +249,12 @@ double Drive::Forward(double d, int8_t percent) {
     leftMotor.SetPercent(leftPercent);
     rightMotor.SetPercent(rightPercent);
 
+    float timeStart = TimeNow();
     float timeSinceCorrection = TimeNow();
 
     // while avg counts of both encoders less than wanted, wait
-    while (((leftEncoder.Counts() + rightEncoder.Counts()) / 2) < wantedCounts) {
+    while (((leftEncoder.Counts() + rightEncoder.Counts()) / 2) < wantedCounts && 
+            (TimeNow() - timeStart) < TIMEOUT) {
         // if time per correction has passed, adjust percentages
         if (TimeNow() - timeSinceCorrection > TIME_PER_CORR) {
             int diff = abs(leftPercent)-abs(rightPercent);
@@ -332,6 +319,7 @@ double Drive::TimedForward(double s, int8_t percent) {
 }
 double Drive::Reverse(double d, int8_t percent) {
     // find wanted count value, reset encoders, and drive
+    const int TIMEOUT = 10;
     double wantedCounts = (d / (PI*WHEEL_DIAMETER)) * COUNTS_PER_REV;
     leftEncoder.ResetCounts();
     rightEncoder.ResetCounts();
@@ -340,10 +328,12 @@ double Drive::Reverse(double d, int8_t percent) {
     leftMotor.SetPercent(leftPercent);
     rightMotor.SetPercent(rightPercent);
 
+    float timeStart = TimeNow();
     float timeSinceCorrection = TimeNow();
 
     // while avg counts of both encoders less than wanted, wait
-    while (((leftEncoder.Counts() + rightEncoder.Counts()) / 2) < wantedCounts) {
+    while (((leftEncoder.Counts() + rightEncoder.Counts()) / 2) < wantedCounts && 
+            (TimeNow() - timeStart) < TIMEOUT) {
         // if time per correction has passed, adjust percentages
         if (TimeNow() - timeSinceCorrection > TIME_PER_CORR) {
             int diff = abs(leftPercent)-abs(rightPercent);
@@ -670,61 +660,108 @@ void colorTest() {
         Sleep(.25);
     }
 }
-void milestoneOne() {
-    // x y vars
-    int x, y;
+void FinalRun() {
+    // rcs start
+    RCS.InitializeTouchMenu("F5");
+    WaitForFinalAction();
 
-    // draw screen
-    LCD.DrawVerticalLine(.5*X_MAX, 0, Y_MAX);
-    LCD.WriteAt("Straight", .1*X_MAX, .5*Y_MAX);
-    LCD.WriteAt("Up Ramp", .6*X_MAX, .5*Y_MAX);
-
-    // wait for touch & release
-    while (!LCD.Touch(&x, &y)) {}
-    while (LCD.Touch(&x, &y)) {}
-    
-    // countdown
-    for (int i = 3; i > 0; i--) {
-        LCD.Clear();
-        LCD.WriteAt(i, .45*X_MAX, .45*Y_MAX);
-        Sleep(1.);
-    }
-
-    // intermittent text
-    LCD.Clear();
-    LCD.WriteLine("Doing task...");
-
-    // read button press
-    if (x <= .5*X_MAX) {
-        Drive::Forward(30, 30);
-    } else {
-        Drive::Forward(36, 35);
-        Maneuver::TurnOneWheel('L', 45, 20);
-        Maneuver::Turn('L', 135, 20);
-        Drive::Forward(30, 35);
-    }
-
-    // complete
-    LCD.Clear();
-    LCD.WriteLine("Complete!");
-}
-void milestoneTwo() {
-    // wait for start light and press button
+    // start light
     LightInput::WaitForStart();
-    Drive::Forward(2.4, 25); 
-    Drive::Forward(2.4, -25);
 
-    // turn and move to make space to go up ramp
-    Maneuver::Turn('L', 90, 25);
-    Drive::Forward(4.75, 25);
-    Maneuver::TurnOneWheel('L', 48, 25);
+    // press button and back up, drive to composter
+    Drive::TimedReverse(.75, 25);
+    Drive::Forward(9, 25);
+    Maneuver::TurnOneWheel('L', 132, -25);
+    Drive::Reverse(5.4, 25);
+    Drive::TimedForward(.1, 20);
 
-    // go up ramp
-    Drive::Forward(30.75, 35);
+    // spin
+    Forklift::MoveHorizontal('L', 1.5);
+    Drive::TimedReverse(.25, 20);
+    Forklift::MoveHorizontal('R', 1.25);
 
-    // drive to cds cell
+    // drive up to apple bucket
+    Maneuver::TurnOneWheel('L', 89, 25);
+    Drive::Forward(11.5, 30);
     Maneuver::Turn('L', 88, 25);
-    Drive::Forward(12.4, 25);
+    Drive::Forward(7, 25);
+    Drive::TimedForward(.5, 20);
+    Drive::TimedReverse(.15, 15);
+
+    // pick up apple bucket
+    Forklift::MoveVertical('u', 1.5);
+
+    // travel to and up ramp
+    Drive::Reverse(3.25, 20);
+    Maneuver::Turn('L', 90, 25);
+    Drive::Forward(6.5, 25);
+    Maneuver::Turn('L', 90, 25);
+    Drive::Forward(12.5, 25);
+    Maneuver::TurnOneWheel('L', 89, 35);
+    Drive::Forward(25, 36.5);
+    Maneuver::Turn('L', 90, 25);
+    // flatten against wall right of table
+    Drive::TimedReverse(2.25, 20);
+    Drive::Forward(10.75, 25);
+    Maneuver::Turn('R', 92, 25);
+    Drive::Forward(14.25, 25);
+    Drive::TimedForward(1.25, 20);
+    Drive::TimedReverse(.25, 22);
+
+    // drop bucket
+    Forklift::MoveVertical('d', .5);
+
+    // travel to lever & prep
+    Drive::Reverse(4, 25);
+    Maneuver::Turn('L', 67, 25);
+    Forklift::MoveVertical('u', 1);
+    Drive::Forward(7.25, 25);
+
+    // slap lever down
+    Forklift::MoveVertical('d', 1.75);
+    Forklift::MoveVertical('u', 2);
+    Sleep(.5);
+
+    // if missed, try to readjust and go again
+    //if (RCS.isLeverFlipped() == 0) {
+    //    Maneuver::Turn('l', 8, 20);
+    //    Forklift::MoveVertical('d', 1.25);
+    //    Forklift::MoveVertical('u', 1.75);
+    //}
+
+    // drive to window
+    Drive::Reverse(3, 25);
+    Maneuver::Turn('L', 115, 25);
+    Drive::Forward(10.75, 25);
+    Maneuver::TurnOneWheel('R', 90, 25);
+
+    // open window
+    Forklift::MoveVertical('U', .75);
+    Drive::Forward(1, 25);
+    Sleep(1);
+    if (RCS.isWindowOpen() != 1) { // window is open
+        // finish
+        Drive::TimedForward(.65, 35);
+    } else { // missed the window right
+        // adjust and try again
+        Drive::Reverse(1, 25);
+        Maneuver::Turn('L', 90, 20);
+        Drive::Forward(.3, 20);
+        Maneuver::Turn('R', 90, 20);
+        Drive::TimedForward(.7, 35);
+    }
+    
+    // go to cds cell
+    Drive::Reverse(8, 25);
+    Maneuver::Turn('R', 100, 25);
+    Drive::Forward(6, 25);
+    Maneuver::Turn('L', 90, 25);
+
+    // inch forward until color read
+    while (LightInput::GetColorReading(false) == EMPTY) {
+        Drive::Forward(.35, 20);
+        Sleep(.1);
+    }
 
     // get color reading
     Color humidifierButton = LightInput::GetColorReading(false);
@@ -734,12 +771,12 @@ void milestoneTwo() {
     if (humidifierButton == LBLUE) {
         Maneuver::Turn('L', 90, 25);
         Drive::Forward(2, 25);
-        Maneuver::Turn('R', 90, 25);
+        Maneuver::Turn('R', 92, 25);
         buffer = -1;
     } else if (humidifierButton == LRED) {
         Maneuver::Turn('R', 90, 25);
         Drive::Forward(2, 25);
-        Maneuver::Turn('L', 90, 25);
+        Maneuver::Turn('L', 92, 25);
         buffer = 1;
     } else {
         Maneuver::Turn('L', 90, 25);
@@ -747,85 +784,18 @@ void milestoneTwo() {
         Maneuver::Turn('R', 90, 25);
         buffer = -1;
     }
-    Drive::Forward(6.75, 25);
+    Forklift::MoveVertical('D', .8);
+    Drive::TimedForward(3, 20);
 
     // return to button
-    Drive::Forward(2, -25);
-    Maneuver::Turn('R', 180, 25);
-    Drive::Forward(4.75 + 12.4, 25);
-    Maneuver::Turn('R', 90, 25);
+    Drive::Reverse(2, 25);
+    Forklift::MoveVertical('U', 1);
+    Maneuver::Turn('R', 175, 25);
+    Drive::Forward(16, 25);
+    Maneuver::Turn('R', 88, 25);
     Drive::Forward(30.75 + (2 * buffer), 30);
 
     // press button
     Drive::Forward(5, 25);
-}
-void milestoneThree() {
-    // start light
-    LightInput::WaitForStart();
-
-    // press button and space from it
-    Drive::TimedForward(.75, 20);
-    Drive::Reverse(2.4, 25);
-    
-    // turn and move to make space to go up ramp
-    Maneuver::Turn('L', 90, 25);
-    Drive::Forward(4.75, 25);
-    Maneuver::TurnOneWheel('L', 45, 25);
-
-    // go up ramp
-    Drive::Forward(25.4, 35);
-
-    // turn and open window
-    Maneuver::Turn('L', 88, 25);
-    Drive::Forward(13.5, 35);
-
-    // wrap around window handle
-    Drive::Reverse(3, 20);
-    Maneuver::TurnOneWheel('R', 45, 30);
-    Drive::Forward(6, 20);
-    Maneuver::TurnOneWheel('L', 90, 30);
-    Drive::Forward(6, 20);
-    Maneuver::TurnOneWheel('R', 45, 30);
-
-    // close window
-    Drive::Reverse(10, 35);
-}
-void milestoneFour() {
-    // start light
-    LightInput::WaitForStart();
-
-    // press button and back up
-    Drive::TimedForward(.25, -20); // kinda cheating forward, should write one for reverse
-    Drive::Forward(21.675, 30);
-    Maneuver::Turn('L', 45, 20);
-
-    // grab bucket
-    Drive::Forward(3.25, 20);
-    Forklift::MoveVertical('u', 1);
-    Sleep(.25);
-    Drive::Reverse(3.25, 20);
-    
-    // travel to and up ramp
-    Maneuver::Turn('L', 90, 25);
-    Drive::Forward(6.5, 25);
-    Maneuver::Turn('L', 90, 25);
-    Drive::Forward(11, 25);
-    Maneuver::TurnOneWheel('L', 89, 35);
-    Drive::Forward(25, 36.5);
-    Maneuver::Turn('L', 90, 25);
-    Drive::Forward(4.1, 25);
-    Maneuver::Turn('R', 92, 25);
-    Drive::Forward(15.5, 25);
-    Forklift::MoveVertical('d', .5);
-    Sleep(.25);
-    Drive::Reverse(4, 25);
-    Maneuver::Turn('L', 70, 25);
-    Forklift::MoveVertical('u', 1);
-    Sleep(.25);
-    Drive::Forward(9.6, 25);
-    Maneuver::TurnOneWheel('L', 10, 20);
-    Forklift::MoveVertical('d', 1.5);
-}
-void milestoneFive() {
-    
+    Drive::TimedForward(3, 20);
 }
