@@ -201,9 +201,7 @@ public:
  * Test for color values.
  */
 void colorTest();
-/**
- * Main function code for milestone one.
- */
+void FinalRun();
 
 // main
 void ERCMain() {
